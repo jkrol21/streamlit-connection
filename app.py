@@ -107,7 +107,6 @@ with sample_col:
     
     st.button("New Image", on_click=new_random_image)
     sample_image = get_image_from_s3(st.session_state.random_image_path)
-    Image.open("./data/healthy_train.0.jpg")
     st.image(sample_image,  width=300)
 
 with upload_col:
