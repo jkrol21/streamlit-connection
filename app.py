@@ -1,19 +1,20 @@
-
 import boto3
-import io
 import numpy as np
+import io
+from PIL import Image
 import streamlit as st
 import toml
 import torch
 import torchvision.transforms as T
 from transformers import AutoFeatureExtractor, AutoModel
 
-from PIL import Image
 from qdrant_connection import QdrantConnection
 
+#####################################
+## Resources
+#####################################
 @st.cache_data
 def load_embedding_model():
-
     model_ckpt = "nateraw/vit-base-beans"
     extractor = AutoFeatureExtractor.from_pretrained(model_ckpt)
     model = AutoModel.from_pretrained(model_ckpt)
@@ -22,11 +23,8 @@ def load_embedding_model():
 
 @st.cache_resource
 def load_transformation_chain():
-     
-     # Data transformation chain.
      transformation_chain = T.Compose(
             [
-                # We first resize the input image to 256x256 and then we take center crop.
                 T.Resize(int((256 / 224) * extractor.size["height"])),
                 T.CenterCrop(extractor.size["height"]),
                 T.ToTensor(),
@@ -35,10 +33,6 @@ def load_transformation_chain():
         )
      
      return transformation_chain
-
-conn = st.experimental_connection('qdrant', type=QdrantConnection)
-model, extractor = load_embedding_model()
-transformation_chain = load_transformation_chain()
 
 @st.cache_resource
 def load_s3_bucket():
@@ -55,8 +49,12 @@ def load_s3_bucket():
     beans_bucket = s3_resource.Bucket("beans-data")
     return beans_bucket
 
-
-# load image from s3 using boto3
+# Establish a st.connection to Qdrant
+conn = st.experimental_connection('qdrant', type=QdrantConnection)
+# Embedding Model
+model, extractor = load_embedding_model()
+transformation_chain = load_transformation_chain()
+# Load image from s3 using boto3
 beans_bucket = load_s3_bucket()
 
 @st.cache_data
@@ -72,7 +70,6 @@ def get_image_from_s3(path):
     
     return img
 
-
 def get_embeddings(image):
     with torch.no_grad():
             image_transformed = transformation_chain(image).unsqueeze(0)
@@ -80,17 +77,14 @@ def get_embeddings(image):
 
     return embeddings
 
+def new_random_image():
+    st.session_state["random_image_path"] = np.random.choice(test_image_paths)
 
 labels_mapping = {
     0: "Angular Leaf Spot",
     1: "Bean Rust",
     2: "Healthy",
 }
-
-# callback function to change the random number stored in state
-def new_random_image():
-    st.session_state["random_image_path"] = np.random.choice(test_image_paths)
-
 
 #####################################
 ## Streamlit App
@@ -107,21 +101,20 @@ test_image_paths = load_test_image_paths()
 
 sample_col, upload_col = st.columns(2)
 with sample_col:
-    st.markdown('### Draw a Sample Image from Holdout Set')
+    st.markdown('### Draw a Sample Image')
     if "random_image_path" not in st.session_state:
         st.session_state["random_image_path"] = np.random.choice(test_image_paths)
     
     st.button("New Image", on_click=new_random_image)
     sample_image = get_image_from_s3(st.session_state.random_image_path)
     Image.open("./data/healthy_train.0.jpg")
-    st.image(sample_image, caption=['Random Image from Dataset'], width=300)
+    st.image(sample_image,  width=300)
 
 with upload_col:
     st.markdown('### Upload Your Own Image')
     # form to upload and image
     img_upload = st.file_uploader('Upload an image', type=['png', 'jpg', 'jpeg'])
     st.markdown('If no Image is uploaded the sample image will be used.')
-
 
 
 st.markdown("""
@@ -143,9 +136,20 @@ if st.button('Find Similar Images'):
     similar_images = conn.find_similars(img_embeddings, limit=3)
 
     for i, similar_image in enumerate(similar_images):
-        st.markdown(f"#### Match {i+1}, Score: {similar_image['score']:0.2f}")
-        st.write(f"Bean Class: {labels_mapping[similar_image['label']]}")
-        st.image(get_image_from_s3(similar_image['path']), width=300)
+        match_desc_col, match_img_col = st.columns([1,2])
+
+        with match_desc_col:
+            st.markdown(f"""
+                        ### {i+1}. Match      
+                        
+                        **Score: {similar_image['score']:0.2f}**
+
+                        *{labels_mapping[similar_image['label']]}*
+                """)
+            #st.write(f"Bean Class: {labels_mapping[similar_image['label']]}")
+        
+        with match_img_col:
+            st.image(get_image_from_s3(similar_image['path']), width=300)
         
 
 st.markdown("## 📚 Methodology")
@@ -159,3 +163,5 @@ with st.expander("Embedding Methodology", expanded=False):
         Data
         https://github.com/AI-Lab-Makerere/ibean/
         """)
+
+st.write("Code: https://github.com/jkrol21/streamlit-connection")
