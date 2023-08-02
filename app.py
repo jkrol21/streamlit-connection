@@ -6,29 +6,33 @@ import streamlit as st
 import toml
 import torch
 import torchvision.transforms as T
-from transformers import AutoFeatureExtractor, AutoModel
+from transformers import AutoModel
 
 from qdrant_connection import QdrantConnection
 
 #####################################
 ## Resources
 #####################################
-@st.cache_data
+@st.cache_resource
 def load_embedding_model():
     model_ckpt = "nateraw/vit-base-beans"
-    extractor = AutoFeatureExtractor.from_pretrained(model_ckpt)
     model = AutoModel.from_pretrained(model_ckpt)
 
-    return model, extractor
+    return model
 
 @st.cache_resource
 def load_transformation_chain():
+     extractor_height = 224
+     extractor_image_mean = [0.5, 0.5, 0.5]
+     extractor_image_std = [0.5, 0.5, 0.5]
+     # Data transformation chain.
      transformation_chain = T.Compose(
             [
-                T.Resize(int((256 / 224) * extractor.size["height"])),
-                T.CenterCrop(extractor.size["height"]),
+                # We first resize the input image to 256x256 and then we take center crop.
+                T.Resize(int((256 / 224) * extractor_height)),
+                T.CenterCrop(extractor_height),
                 T.ToTensor(),
-                T.Normalize(mean=extractor.image_mean, std=extractor.image_std),
+                T.Normalize(mean=extractor_image_mean, std=extractor_image_std),
             ]
         )
      
@@ -52,7 +56,7 @@ def load_s3_bucket():
 # Establish a st.connection to Qdrant
 conn = st.experimental_connection('qdrant', type=QdrantConnection)
 # Embedding Model
-model, extractor = load_embedding_model()
+model = load_embedding_model()
 transformation_chain = load_transformation_chain()
 # Load image from s3 using boto3
 beans_bucket = load_s3_bucket()
@@ -61,7 +65,6 @@ beans_bucket = load_s3_bucket()
 def load_test_image_paths():
     return [object.key for object in beans_bucket.objects.filter(Prefix="test").all() if object.key.endswith(".jpg")]
 
-@st.cache_data
 def get_image_from_s3(path):
     object = beans_bucket.Object(path)
     file_stream = io.BytesIO()
